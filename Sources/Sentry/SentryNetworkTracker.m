@@ -106,6 +106,25 @@ SentryNetworkTracker ()
                                                       sessionTask.currentRequest.HTTPMethod, url]];
             }
         }];
+        
+        __block id<SentrySpan> transaction;
+        transaction = objc_getAssociatedObject(sessionTask, &SENTRY_NETWORK_REQUEST_TRACKER_TRANSACTION);
+        
+        // The task already has a transaction. Nothing to do.
+        if (transaction == nil) {
+            transaction = [
+                SentrySDK startTransactionWithName:[NSString stringWithFormat:@"http:%@",url.path]
+                                                    operation:@"http.request"
+            ];
+            
+            [transaction setTagValue:sessionTask.currentRequest.HTTPMethod forKey:@"request_method"];
+            [transaction setTagValue:url.host forKey:@"request_host"];
+            [transaction setTagValue:url.path forKey:@"request_path"];
+            [transaction setDataValue:url.absoluteString forKey:@"request_full_url"];
+            
+            objc_setAssociatedObject(sessionTask, &SENTRY_NETWORK_REQUEST_TRACKER_TRANSACTION, transaction,
+                OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
 
         // We only create a span if there is a transaction in the scope,
         // otherwise we have nothing else to do here.
@@ -142,10 +161,16 @@ SentryNetworkTracker ()
         return;
 
     id<SentrySpan> netSpan;
+    id<SentrySpan> transaction;
+    
     @synchronized(sessionTask) {
         netSpan = objc_getAssociatedObject(sessionTask, &SENTRY_NETWORK_REQUEST_TRACKER_SPAN);
         // We'll just go through once
         objc_setAssociatedObject(sessionTask, &SENTRY_NETWORK_REQUEST_TRACKER_SPAN, nil,
+            OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        
+        transaction = objc_getAssociatedObject(sessionTask, &SENTRY_NETWORK_REQUEST_TRACKER_TRANSACTION);
+        objc_setAssociatedObject(sessionTask, &SENTRY_NETWORK_REQUEST_TRACKER_TRANSACTION, nil,
             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
 
@@ -161,19 +186,27 @@ SentryNetworkTracker ()
                 [netSpan setTagValue:[NSString stringWithFormat:@"%@", statusCode]
                               forKey:@"http.status_code"];
             }
+            
+            if (transaction != nil) {
+                [transaction setTagValue:[NSString stringWithFormat:@"%@", statusCode]
+                              forKey:@"http_code"];
+            }
         }
     }
 
-    if (netSpan == nil) {
-        return;
+    if (netSpan != nil) {
+        [netSpan setDataValue:sessionTask.currentRequest.HTTPMethod forKey:@"method"];
+        [netSpan setDataValue:sessionTask.currentRequest.URL.path forKey:@"url"];
+        [netSpan setDataValue:@"fetch" forKey:@"type"];
+
+        [netSpan finishWithStatus:[self statusForSessionTask:sessionTask state:newState]];
+        [SentryLog logWithMessage:@"Finished HTTP span for sessionTask" andLevel:kSentryLevelDebug];
     }
-
-    [netSpan setDataValue:sessionTask.currentRequest.HTTPMethod forKey:@"method"];
-    [netSpan setDataValue:sessionTask.currentRequest.URL.path forKey:@"url"];
-    [netSpan setDataValue:@"fetch" forKey:@"type"];
-
-    [netSpan finishWithStatus:[self statusForSessionTask:sessionTask state:newState]];
-    [SentryLog logWithMessage:@"Finished HTTP span for sessionTask" andLevel:kSentryLevelDebug];
+    
+    if (transaction != nil) {
+        [transaction finishWithStatus:[self statusForSessionTask:sessionTask state:newState]];
+        [SentryLog logWithMessage:@"Finished HTTP transaction for sessionTask" andLevel:kSentryLevelDebug];
+    }
 }
 
 - (void)addBreadcrumbForSessionTask:(NSURLSessionTask *)sessionTask
