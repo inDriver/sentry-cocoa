@@ -113,7 +113,7 @@ SentryNetworkTracker ()
         // The task already has a transaction. Nothing to do.
         if (transaction == nil) {
             transaction = [
-                SentrySDK startTransactionWithName:[NSString stringWithFormat:@"http:%@",url.path]
+                SentrySDK startTransactionWithName:[NSString stringWithFormat:@"http: %@",url.path]
                                                     operation:@"http.request"
             ];
             
