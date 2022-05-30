@@ -192,7 +192,12 @@ NSString *const DropSessionLogMessage = @"Session has no release name. Won't sen
     mechanism.meta = mechanismMeta;
     // The description of the error can be especially useful for error from swift that
     // use a simple enum.
-    mechanism.desc = error.description;
+    
+    if ([error respondsToSelector:@selector(description)]) {
+        mechanism.desc = error.description;
+    } else {
+        mechanism.desc = @"";
+    }
     
     NSDictionary<NSString *, id> *userInfo = [[NSDictionary alloc] init];
     if ([error respondsToSelector:@selector(userInfo)]) {
